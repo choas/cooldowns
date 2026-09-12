@@ -31,7 +31,7 @@ ok()   { printf '  %s✔%s %s\n' "$GREEN" "$RESET" "$(tilde "$*")"; SUMMARY="${S
 off()  { printf '  %s✔ OFF%s %s\n' "$RED" "$RESET" "$(tilde "$*")"; SUMMARY="${SUMMARY}  ✔ OFF $(tilde "$*")"$'\n'; }
 warn() { printf '  %s!%s %s\n' "$YELLOW" "$RESET" "$(tilde "$*")"; }
 skip() { printf '  %s– %s%s\n' "$DIM" "$*" "$RESET"; }
-hint() { printf '    %s%s%s\n' "$DIM" "$*" "$RESET"; }
+hint() { printf '    %s%s%s\n' "$DIM" "$(tilde "$*")" "$RESET"; }
 die()  { printf '%sERROR:%s %s\n' "$RED" "$RESET" "$*" >&2; exit 1; }
 
 SUMMARY=""
@@ -297,6 +297,21 @@ tool_target() {
   fi
 }
 
+# cargo-cooldown pulls ~245 crates when compiled; prefer the prebuilt release binary.
+cargo_cooldown_install_hint() {
+  local asset
+  case "$(uname -s)-$(uname -m)" in
+    Darwin-arm64) asset="cargo-cooldown-aarch64-apple-darwin-<ver>.tgz";;
+    Darwin-x86_64) asset="cargo-cooldown-x86_64-apple-darwin-<ver>.tgz";;
+    Linux-aarch64) asset="cargo-cooldown-aarch64-unknown-linux-gnu-<ver>.tgz";;
+    Linux-x86_64) asset="cargo-cooldown-x86_64-unknown-linux-gnu-<ver>.tgz";;
+    *) asset="";;
+  esac
+  printf 'prebuilt binary (no compiling): https://github.com/dertin/cargo-cooldown/releases%s\n' "${asset:+  → $asset, verify SHA256SUMS, unpack into ~/.cargo/bin}"
+  printf 'or compile with pinned deps (~245 crates): cargo install --locked cargo-cooldown\n'
+  printf 'then use:  cargo cooldown build | check | update'
+}
+
 # ------------------------------------------------------------------ per-tool apply: do_<tool> SCOPE DAYS
 do_npm() {
   local f=".npmrc"; [ "$1" = global ] && f="$HOME/.npmrc"
@@ -414,8 +429,8 @@ do_cargo() {
     hint "use:  cargo cooldown build | check | test | update   (stable cargo has no cooldown yet)"
   else
     warn "cargo-cooldown is NOT installed – the setting only works through it:"
-    hint "cargo install cargo-cooldown   →  then use:  cargo cooldown build | check | update"
-    case "$UPGRADES" in *cargo-cooldown*) ;; *) UPGRADES="${UPGRADES}  Cargo: cargo-cooldown missing"$'\n'"      cargo install cargo-cooldown"$'\n';; esac
+    hint "$(cargo_cooldown_install_hint)"
+    case "$UPGRADES" in *cargo-cooldown*) ;; *) UPGRADES="${UPGRADES}  Cargo: cargo-cooldown missing"$'\n'"      $(cargo_cooldown_install_hint | sed '2,$s/^/      /')"$'\n';; esac
   fi
   hint "exceptions in $f:  [[allow.package]] crate = \"openssl\" min-publish-age = \"0\""
 }

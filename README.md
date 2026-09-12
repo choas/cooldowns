@@ -43,7 +43,7 @@ The header shows the installed version and whether it supports cooldowns. At the
 | Poetry | `poetry config` | `poetry.toml` | `solver.min-release-age` (days) |
 | PDM | `pdm config` | `pyproject.toml [tool.pdm.resolution]` | `exclude-newer` |
 | pixi | – | `pixi.toml [workspace]` | `exclude-newer` |
-| Cargo | `~/.cargo/cooldown.toml` | `cooldown.toml` | `global-min-publish-age` (needs [cargo-cooldown](https://github.com/dertin/cargo-cooldown)) |
+| Cargo | `~/.cargo/cooldown.toml` | `cooldown.toml` | `global-min-publish-age` (needs [cargo-cooldown](https://github.com/dertin/cargo-cooldown), see below) |
 | Bundler | `bundle config --global` | `.bundle/config` | `cooldown` (days) |
 | Hex | `mix hex.config` | `mix.exs` | `cooldown` |
 | mise | `~/.config/mise/config.toml` | `mise.toml` | `[settings] minimum_release_age` |
@@ -54,6 +54,8 @@ The header shows the installed version and whether it supports cooldowns. At the
 **Turn OFF** writes an explicit `0` where the tool has a built-in default (pnpm 11, Yarn 4.15, Deno 2.9, mise, Dependabot, Renovate); for uv, pip, PDM and pixi it removes the key.
 
 Env-var based settings go to `~/.cooldowns.env`, sourced from `~/.zshrc`.
+
+**Cargo** has no stable cooldown yet; the setting only works through [cargo-cooldown](https://github.com/dertin/cargo-cooldown) (`cargo cooldown build`). Compiling it pulls in ~245 crates, so prefer the [prebuilt binary](https://github.com/dertin/cargo-cooldown/releases) (verify `SHA256SUMS`, unpack into `~/.cargo/bin`) or at least `cargo install --locked cargo-cooldown`.
 
 ## Requirements
 
