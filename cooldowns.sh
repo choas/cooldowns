@@ -647,6 +647,40 @@ run_local() {
 
 usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
+# Explain why `cargo` is not nightly although rust-toolchain.toml says so.
+cargo_bypass_diagnosis() {
+  local v="$1" onpath proxydir
+  onpath="$(command -v cargo)"
+  if [ -n "${RUSTUP_TOOLCHAIN:-}" ]; then
+    warn "active cargo is '$v': RUSTUP_TOOLCHAIN=$RUSTUP_TOOLCHAIN overrides rust-toolchain.toml – unset it"
+    return
+  fi
+  if ! rustup toolchain list 2>/dev/null | grep -q '^nightly'; then
+    warn "active cargo is still '$v' – nightly is not installed yet; the next cargo call installs it"
+    return
+  fi
+  # nightly is installed and rustup honours the file, so the cargo on PATH must bypass rustup
+  case "$onpath" in
+    */toolchains/*)
+      warn "active cargo is '$v' because PATH points straight at a toolchain, bypassing rustup:"
+      hint "  $onpath"
+      hint "rustup itself resolves this directory to: $(rustup show active-toolchain 2>/dev/null)"
+      proxydir=""
+      if has brew && [ -x "$(brew --prefix rustup 2>/dev/null)/bin/cargo" ]; then proxydir="$(brew --prefix rustup)/bin"
+      elif [ -x "$HOME/.cargo/bin/cargo" ]; then proxydir="$HOME/.cargo/bin"; fi
+      if [ -n "$proxydir" ]; then
+        hint "fix: put the rustup proxies first and drop the hardcoded toolchain dir from your shell config:"
+        hint "  export PATH=\"$proxydir:\$PATH\"        # rustup proxies (cargo, rustc, …) read rust-toolchain.toml"
+        grep -nF 'toolchains/' "$ZSHRC" 2>/dev/null | head -3 | while IFS= read -r l; do hint "  ~/.zshrc:$l"; done
+      else
+        hint "fix: put the directory with rustup's cargo/rustc proxies first in PATH (rustup-init: ~/.cargo/bin; Homebrew: \$(brew --prefix rustup)/bin)"
+      fi;;
+    *)
+      warn "active cargo is '$v' although rustup resolves this directory to '$(rustup show active-toolchain 2>/dev/null)'"
+      hint "cargo on PATH: $onpath · rustup would run: $(rustup which cargo 2>/dev/null)";;
+  esac
+}
+
 # --rust-nightly: pin the current Rust project to nightly and enable cargo's native min-publish-age
 rust_nightly() {
   local ans v c=".cargo/config.toml"
@@ -688,7 +722,7 @@ rust_nightly() {
   case "$v" in
     *nightly*) ok "active cargo in this directory: $v";;
     "") warn "cargo not found on PATH";;
-    *) warn "active cargo is still '$v' – nightly is not installed yet; the next cargo call installs it";;
+    *) cargo_bypass_diagnosis "$v";;
   esac
   hint "plain  cargo build / update  now applies the cooldown · bypass once: CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow cargo update -p <crate>"
   hint "back to stable: rm rust-toolchain.toml   (the config keys are ignored by stable < 1.100 and used natively from Rust 1.100 on)"
