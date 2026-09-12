@@ -200,9 +200,12 @@ ver_badge() {
   min="$(tool_minver "$t")"; bin="$(tool_bin "$t")"
   [ -n "$bin" ] || return 0
   if [ "$t" = cargo ]; then
-    if ! has cargo; then printf '%s(cargo not installed)%s' "$DIM" "$RESET"
-    elif cargo cooldown --version >/dev/null 2>&1; then printf '%scargo-cooldown %s ✔%s' "$GREEN" "$(cargo cooldown --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -1)" "$RESET"
-    else printf '%scargo-cooldown ✗ not installed%s' "$RED" "$RESET"; fi
+    if ! has cargo; then printf '%s(cargo not installed)%s' "$DIM" "$RESET"; return; fi
+    have="$(tool_version cargo)"
+    if cargo_native_ok; then printf '%scargo %s ✔ native%s' "$GREEN" "$(cargo --version 2>/dev/null | grep -q nightly && echo nightly || echo "$have")" "$RESET"
+    else printf '%scargo %s (native needs ≥ 1.100 or nightly)%s' "$DIM" "$have" "$RESET"; fi
+    if cargo cooldown --version >/dev/null 2>&1; then printf ' · %scargo-cooldown %s ✔%s' "$GREEN" "$(cargo cooldown --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -1)" "$RESET"
+    else printf ' · %scargo-cooldown ✗ not installed%s' "$RED" "$RESET"; fi
     return
   fi
   if ! has "$bin"; then printf '%s(not installed%s)%s' "$DIM" "${min:+, needs ≥ $min}" "$RESET"; return; fi
@@ -235,7 +238,7 @@ tool_label() {
     npm) echo "npm";;            pnpm) echo "pnpm";;        yarn) echo "Yarn (Berry)";;
     bun) echo "Bun";;            deno) echo "Deno";;        uv) echo "uv";;
     pip) echo "pip";;            pipenv) echo "pipenv";;    poetry) echo "Poetry";;
-    pdm) echo "PDM";;            pixi) echo "pixi";;        cargo) echo "Cargo (via cargo-cooldown)";;
+    pdm) echo "PDM";;            pixi) echo "pixi";;        cargo) echo "Cargo";;
     bundler) echo "Bundler (Ruby)";; hex) echo "Hex (Elixir mix)";; mise) echo "mise";;
     vscode) echo "VS Code extensions auto-update";;
     dependabot) echo "Dependabot";; renovate) echo "Renovate";;
@@ -275,7 +278,7 @@ tool_target() {
       yarn) echo "~/.yarnrc.yml";;  bun) echo "~/.bunfig.toml";;
       uv) echo "~/.config/uv/uv.toml";;  pip) echo "pip config --user (install.uploaded-prior-to)";;
       pipenv) echo "~/.cooldowns.env (PIP_UPLOADED_PRIOR_TO)";;  poetry) echo "poetry config solver.min-release-age";;
-      pdm) echo "pdm config strategy.exclude-newer";;  cargo) echo "${CARGO_HOME:-~/.cargo}/cooldown.toml";;
+      pdm) echo "pdm config strategy.exclude-newer";;  cargo) echo "${CARGO_HOME:-~/.cargo}/config.toml + cooldown.toml";;
       bundler) echo "bundle config --global cooldown";;  hex) echo "mix hex.config cooldown";;
       mise) echo "~/.config/mise/config.toml";;  vscode) echo "$(vscode_settings | sed "s|^$HOME|~|")";;
     esac
@@ -290,11 +293,18 @@ tool_target() {
       pipenv) echo "Pipfile [pipenv]";;  poetry) echo "poetry.toml [solver]";;
       pdm) echo "pyproject.toml [tool.pdm.resolution]";;
       pixi) if [ -f pixi.toml ] || [ ! -f pyproject.toml ]; then echo "pixi.toml [workspace]"; else echo "pyproject.toml [tool.pixi.workspace]"; fi;;
-      cargo) echo "cooldown.toml";;  bundler) echo ".bundle/config";;  hex) echo "mix.exs";;
+      cargo) echo ".cargo/config.toml + cooldown.toml";;  bundler) echo ".bundle/config";;  hex) echo "mix.exs";;
       mise) echo "$(mise_file) [settings]";;
       dependabot) echo "$(dependabot_file)";;  renovate) echo "$(renovate_file)";;
     esac
   fi
+}
+
+# native cargo min-publish-age: nightly since 2026-06-21 (-Zmin-publish-age), stable from Rust 1.100
+cargo_native_ok() {
+  has cargo || return 1
+  cargo --version 2>/dev/null | grep -q nightly && return 0
+  version_ge "$(tool_version cargo)" 1.100.0
 }
 
 # cargo-cooldown pulls ~245 crates when compiled; prefer the prebuilt release binary.
@@ -421,18 +431,30 @@ do_pixi() {
 }
 
 do_cargo() {
-  local f="cooldown.toml" v; [ "$1" = global ] && f="${CARGO_HOME:-$HOME/.cargo}/cooldown.toml"
+  local f="cooldown.toml" c=".cargo/config.toml" v
+  if [ "$1" = global ]; then f="${CARGO_HOME:-$HOME/.cargo}/cooldown.toml"; c="${CARGO_HOME:-$HOME/.cargo}/config.toml"; fi
   if [ "$2" = 0 ]; then v='"0"'; else v="\"$2 days\""; fi
+  # native cargo (nightly -Z now, stable ≥ 1.100); stable < 1.100 ignores both tables silently
+  toml_set "$c" registry global-min-publish-age "$v"
+  toml_set "$c" unstable min-publish-age true
+  # cargo-cooldown wrapper (works on any stable cargo today)
   toml_set "$f" registry global-min-publish-age "$v"
-  if [ "$2" = 0 ]; then off "Cargo: [registry] global-min-publish-age = \"0\" → $f"; else ok "Cargo: [registry] global-min-publish-age = $v → $f"; fi
-  if cargo cooldown --version >/dev/null 2>&1; then
-    hint "use:  cargo cooldown build | check | test | update   (stable cargo has no cooldown yet)"
+  if [ "$2" = 0 ]; then off "Cargo: [registry] global-min-publish-age = \"0\" → $c and $f"
+  else ok "Cargo: [registry] global-min-publish-age = $v → $c (native) and $f (cargo-cooldown)"; fi
+  if cargo_native_ok; then
+    hint "native cargo supports it: plain  cargo build  applies the cooldown"
   else
-    warn "cargo-cooldown is NOT installed – the setting only works through it:"
-    hint "$(cargo_cooldown_install_hint)"
-    case "$UPGRADES" in *cargo-cooldown*) ;; *) UPGRADES="${UPGRADES}  Cargo: cargo-cooldown missing"$'\n'"      $(cargo_cooldown_install_hint | sed '2,$s/^/      /')"$'\n';; esac
+    hint "native support needs Rust ≥ 1.100 (stable late Sept 2026) or nightly – switch this project:"
+    hint "  rustup toolchain install nightly && printf '[toolchain]\\nchannel = \"nightly\"\\n' > rust-toolchain.toml   (one-off: cargo +nightly build)"
   fi
-  hint "exceptions in $f:  [[allow.package]] crate = \"openssl\" min-publish-age = \"0\""
+  if cargo cooldown --version >/dev/null 2>&1; then
+    hint "until then:  cargo cooldown build | check | test | update"
+  else
+    warn "cargo-cooldown is NOT installed – on stable < 1.100 the setting only works through it:"
+    hint "$(cargo_cooldown_install_hint)"
+    case "$UPGRADES" in *"Cargo:"*) ;; *) UPGRADES="${UPGRADES}  Cargo: no cooldown support in cargo $(tool_version cargo) and cargo-cooldown missing"$'\n'"      rustup toolchain install nightly   (+ rust-toolchain.toml with channel = \"nightly\")  – or wait for Rust 1.100"$'\n'"      $(cargo_cooldown_install_hint | sed '2,$s/^/      /')"$'\n';; esac
+  fi
+  hint "bypass once: CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow cargo update -p <crate> · exceptions (cargo-cooldown): [[allow.package]] crate = \"x\" min-publish-age = \"0\""
 }
 
 do_bundler() {

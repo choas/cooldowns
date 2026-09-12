@@ -43,7 +43,7 @@ The header shows the installed version and whether it supports cooldowns. At the
 | Poetry | `poetry config` | `poetry.toml` | `solver.min-release-age` (days) |
 | PDM | `pdm config` | `pyproject.toml [tool.pdm.resolution]` | `exclude-newer` |
 | pixi | – | `pixi.toml [workspace]` | `exclude-newer` |
-| Cargo | `~/.cargo/cooldown.toml` | `cooldown.toml` | `global-min-publish-age` (needs [cargo-cooldown](https://github.com/dertin/cargo-cooldown), see below) |
+| Cargo | `~/.cargo/config.toml` + `cooldown.toml` | `.cargo/config.toml` + `cooldown.toml` | `[registry] global-min-publish-age` (see below) |
 | Bundler | `bundle config --global` | `.bundle/config` | `cooldown` (days) |
 | Hex | `mix hex.config` | `mix.exs` | `cooldown` |
 | mise | `~/.config/mise/config.toml` | `mise.toml` | `[settings] minimum_release_age` |
@@ -55,7 +55,16 @@ The header shows the installed version and whether it supports cooldowns. At the
 
 Env-var based settings go to `~/.cooldowns.env`, sourced from `~/.zshrc`.
 
-**Cargo** has no stable cooldown yet; the setting only works through [cargo-cooldown](https://github.com/dertin/cargo-cooldown) (`cargo cooldown build`). Compiling it pulls in ~245 crates, so prefer the [prebuilt binary](https://github.com/dertin/cargo-cooldown/releases) (verify `SHA256SUMS`, unpack into `~/.cargo/bin`) or at least `cargo install --locked cargo-cooldown`.
+**Cargo** gets `[registry] global-min-publish-age` written twice:
+
+- `.cargo/config.toml` (native cargo). Works on nightly since 2026-06-21 (`[unstable] min-publish-age = true` is written too) and on stable from Rust 1.100 (late Sept 2026). Older stable cargo ignores it silently. To use nightly in a project:
+
+  ```sh
+  rustup toolchain install nightly
+  printf '[toolchain]\nchannel = "nightly"\n' > rust-toolchain.toml   # or one-off: cargo +nightly build
+  ```
+
+- `cooldown.toml` for [cargo-cooldown](https://github.com/dertin/cargo-cooldown) (`cargo cooldown build`), which works on any stable cargo today. Compiling it pulls in ~245 crates, so prefer the [prebuilt binary](https://github.com/dertin/cargo-cooldown/releases) (verify `SHA256SUMS`, unpack into `~/.cargo/bin`) or at least `cargo install --locked cargo-cooldown`.
 
 ## Requirements
 
