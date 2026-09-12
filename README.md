@@ -18,6 +18,7 @@ cd cooldowns
 cooldowns            # asks: global or local
 cooldowns global     # user-wide config for every supported installer
 cooldowns local      # the project in the current directory (auto-detected)
+cooldowns --rust-nightly   # Rust project: switch to nightly cargo and enable the native cooldown
 ```
 
 Each installer is asked separately:
@@ -60,8 +61,7 @@ Env-var based settings go to `~/.cooldowns.env`, sourced from `~/.zshrc`.
 - `.cargo/config.toml` (native cargo). Works on nightly since 2026-06-21 (`[unstable] min-publish-age = true` is written too) and on stable from Rust 1.100 (late Sept 2026). Older stable cargo ignores it silently. To use nightly in a project:
 
   ```sh
-  rustup toolchain install nightly
-  printf '[toolchain]\nchannel = "nightly"\n' > rust-toolchain.toml   # or one-off: cargo +nightly build
+  cooldowns --rust-nightly      # in the project: installs nightly, writes rust-toolchain.toml + .cargo/config.toml
   ```
 
 - `cooldown.toml` for [cargo-cooldown](https://github.com/dertin/cargo-cooldown) (`cargo cooldown build`), which works on any stable cargo today. Compiling it pulls in ~245 crates, so prefer the [prebuilt binary](https://github.com/dertin/cargo-cooldown/releases) (verify `SHA256SUMS`, unpack into `~/.cargo/bin`) or at least `cargo install --locked cargo-cooldown`.

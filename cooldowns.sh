@@ -9,6 +9,8 @@
 #         cooldowns.sh global     configure user-wide settings for every supported installer
 #         cooldowns.sh local      configure the project in the current directory
 #         cooldowns.sh --add-zshrc   add  alias cooldowns=~/scripts/cooldowns.sh  to ~/.zshrc
+#         cooldowns.sh --rust-nightly   switch the Rust project in the current dir to nightly cargo
+#                                       (rust-toolchain.toml) and enable cargo's native cooldown
 #         cooldowns.sh -h         help
 #
 # Every installer is asked separately: 1 / 2 / 3 days, turn OFF (explicit 0), or skip.
@@ -444,15 +446,14 @@ do_cargo() {
   if cargo_native_ok; then
     hint "native cargo supports it: plain  cargo build  applies the cooldown"
   else
-    hint "native support needs Rust ≥ 1.100 (stable late Sept 2026) or nightly – switch this project:"
-    hint "  rustup toolchain install nightly && printf '[toolchain]\\nchannel = \"nightly\"\\n' > rust-toolchain.toml   (one-off: cargo +nightly build)"
+    hint "native support needs Rust ≥ 1.100 (stable late Sept 2026) or nightly – switch a project:  cooldowns.sh --rust-nightly"
   fi
   if cargo cooldown --version >/dev/null 2>&1; then
     hint "until then:  cargo cooldown build | check | test | update"
   else
     warn "cargo-cooldown is NOT installed – on stable < 1.100 the setting only works through it:"
     hint "$(cargo_cooldown_install_hint)"
-    case "$UPGRADES" in *"Cargo:"*) ;; *) UPGRADES="${UPGRADES}  Cargo: no cooldown support in cargo $(tool_version cargo) and cargo-cooldown missing"$'\n'"      rustup toolchain install nightly   (+ rust-toolchain.toml with channel = \"nightly\")  – or wait for Rust 1.100"$'\n'"      $(cargo_cooldown_install_hint | sed '2,$s/^/      /')"$'\n';; esac
+    case "$UPGRADES" in *"Cargo:"*) ;; *) UPGRADES="${UPGRADES}  Cargo: no cooldown support in cargo $(tool_version cargo) and cargo-cooldown missing"$'\n'"      cooldowns.sh --rust-nightly   (in the project: nightly + native cooldown)  – or wait for Rust 1.100"$'\n'"      $(cargo_cooldown_install_hint | sed '2,$s/^/      /')"$'\n';; esac
   fi
   hint "bypass once: CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow cargo update -p <crate> · exceptions (cargo-cooldown): [[allow.package]] crate = \"x\" min-publish-age = \"0\""
 }
@@ -644,7 +645,56 @@ run_local() {
   done
 }
 
-usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+
+# --rust-nightly: pin the current Rust project to nightly and enable cargo's native min-publish-age
+rust_nightly() {
+  local ans v c=".cargo/config.toml"
+  has rustup || die "rustup not found – install it from https://rustup.rs"
+  [ -f Cargo.toml ] || die "no Cargo.toml in $PWD – run this inside a Rust project"
+  printf '%s== Rust nightly + native cargo cooldown for %s ==%s\n\n' "$CYAN" "$PWD" "$RESET"
+
+  # 1. nightly toolchain
+  if rustup toolchain list 2>/dev/null | grep -q '^nightly'; then
+    ok "nightly toolchain present: $(rustup run nightly cargo --version 2>/dev/null)"
+  else
+    printf '%sInstall the nightly toolchain now?%s  (rustup toolchain install nightly, a few hundred MB)  [Y/n]: ' "$BOLD" "$RESET"
+    read -r ans || ans=n
+    case "$ans" in
+      n|N|no) warn "not installed – rustup will fetch nightly automatically on the first cargo call in this project";;
+      *) if rustup toolchain install nightly; then ok "nightly toolchain installed: $(rustup run nightly cargo --version 2>/dev/null)"
+         else die "rustup toolchain install nightly failed"; fi;;
+    esac
+  fi
+
+  # 2. pin the project
+  toml_set rust-toolchain.toml toolchain channel '"nightly"'
+  ok "rust-toolchain.toml: [toolchain] channel = \"nightly\"  (only this project uses nightly)"
+
+  # 3. native cooldown
+  printf '\n%sCargo native cooldown%s  %s→ %s%s\n' "$BOLD" "$RESET" "$DIM" "$c" "$RESET"
+  if ask_days; then
+    if [ "$DAYS" = 0 ]; then v='"0"'; else v="\"$DAYS days\""; fi
+    toml_set "$c" unstable min-publish-age true
+    toml_set "$c" registry global-min-publish-age "$v"
+    if [ "$DAYS" = 0 ]; then off "Cargo: [registry] global-min-publish-age = \"0\" → $c"
+    else ok "Cargo: [unstable] min-publish-age = true + [registry] global-min-publish-age = $v → $c"; fi
+  else
+    skip "cooldown value not changed"
+  fi
+
+  # 4. verify what cargo resolves to here now
+  v="$(cargo --version 2>/dev/null)"
+  case "$v" in
+    *nightly*) ok "active cargo in this directory: $v";;
+    "") warn "cargo not found on PATH";;
+    *) warn "active cargo is still '$v' – nightly is not installed yet; the next cargo call installs it";;
+  esac
+  hint "plain  cargo build / update  now applies the cooldown · bypass once: CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow cargo update -p <crate>"
+  hint "back to stable: rm rust-toolchain.toml   (the config keys are ignored by stable < 1.100 and used natively from Rust 1.100 on)"
+  printf '\n%s== Summary ==%s\n%s' "$CYAN" "$RESET" "${SUMMARY:-  nothing changed}"$'\n'
+  exit 0
+}
 
 # --add-zshrc: create the "cooldowns" alias in ~/.zshrc (idempotent)
 add_zshrc_alias() {
@@ -672,6 +722,7 @@ main() {
   case "$scope" in
     -h|--help|help) usage;;
     --add-zshrc) add_zshrc_alias;;
+    --rust-nightly) rust_nightly;;
     g|global) scope=global;;
     l|local) scope=local;;
     "")
@@ -679,7 +730,7 @@ main() {
       printf 'Scope?  1) global (user-wide, all installers)   2) local (project: %s)  [1]: ' "$PWD"
       read -r ans || ans=1
       case "$ans" in 2|l|local) scope=local;; *) scope=global;; esac;;
-    *) die "unknown argument '$scope' (use global | local | --add-zshrc | -h)";;
+    *) die "unknown argument '$scope' (use global | local | --add-zshrc | --rust-nightly | -h)";;
   esac
   if [ "$scope" = global ]; then run_global; else run_local; fi
   printf '\n%s== Summary ==%s\n%s' "$CYAN" "$RESET" "${SUMMARY:-  nothing changed}"$'\n'
